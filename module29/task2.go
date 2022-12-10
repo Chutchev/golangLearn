@@ -8,25 +8,28 @@ import (
 )
 
 func main() {
-	var number int
 	c := make(chan os.Signal, 1)
+	numberChan := make(chan string)
 	signal.Notify(c, os.Interrupt, syscall.SIGINT)
-	channel := make(chan int)
 	for {
-		fmt.Println("Введите число!")
-		fmt.Scan(&number)
+		go square(numberChan)
 		select {
-		default:
-			fmt.Println(<-square(number, channel))
+		case b := <-numberChan:
+			fmt.Println(b)
 		case <-c:
+			closeAll()
 			os.Exit(1)
 		}
 	}
-
 }
 
-func square(number int, channel chan int) chan int {
-	result := number * number
-	channel <- result
-	return channel
+func square(numberChan chan string) {
+	var number int
+	fmt.Println("Введите число: ")
+	fmt.Scan(&number)
+	numberChan <- fmt.Sprintf("%d", number*number)
+}
+
+func closeAll() {
+	fmt.Println("Close all!")
 }
