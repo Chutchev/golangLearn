@@ -4,11 +4,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
+	"log"
 	"net/http"
 	"strconv"
 
-	"module31/pkg/friends"
+	"module31/pkg/helpers"
 	"module31/pkg/user"
+
+	"path/filepath"
 
 	"github.com/go-chi/chi/middleware"
 	"github.com/go-chi/chi/v5"
@@ -17,8 +20,17 @@ import (
 
 var users user.Users
 
+var abs, _ = filepath.Abs("../user_service/database.json")
+
 func init() {
-	users.Store = make(map[int]*user.User)
+	data, err := helpers.ReadFile(abs)
+	if err != nil {
+		users.Store = make(map[string]*user.User)
+	}
+	err = json.Unmarshal(data, &users)
+	if err != nil {
+		log.Fatalln(err)
+	}
 }
 func main() {
 	r := chi.NewRouter()
@@ -29,16 +41,12 @@ func main() {
 	r.Use(render.SetContentType(render.ContentTypeJSON))
 
 	r.Post("/create", Create)
-	r.Post("/makeFriends", MakeFriends)
 	r.Get("/all", GetAll)
-	r.Get("/friends/{user_id}", GetFriends)
-
 	r.Delete("/user", DeleteUser)
-
 	r.Put("/{user_id}", ChangeAge)
 
 	fmt.Println("Запускаю сервер!")
-	http.ListenAndServe(":3333", r)
+	http.ListenAndServe(":8081", r)
 
 }
 
@@ -71,6 +79,11 @@ func ChangeAge(w http.ResponseWriter, r *http.Request) {
 	}
 
 	user.Age = changeAge.NewAge
+	err = users.Dump("database.json")
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte("Не удалось сохранить изменения в БД"))
+	}
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte("Возраст пользователя успешно обновлен!"))
 
@@ -101,60 +114,15 @@ func DeleteUser(w http.ResponseWriter, r *http.Request) {
 		friend, _ := users.GetUserByName(friendName)
 		friend.DeleteFriend(user.Name)
 	}
-	delete(users.Store, deleteUser.TargetId)
+	targetId := strconv.Itoa(deleteUser.TargetId)
+	delete(users.Store, targetId)
 	message := fmt.Sprintf("Deleted user with Name: %v", user.Name)
 	w.Write([]byte(message))
-}
-
-func GetFriends(w http.ResponseWriter, r *http.Request) {
-	user_id, err := strconv.Atoi(chi.URLParam(r, "user_id"))
+	err = users.Dump("database.json")
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
-		w.Write([]byte(err.Error()))
-		return
+		w.Write([]byte("Не удалось сохранить изменения в БД"))
 	}
-	userFirst, err := users.GetUserById(user_id)
-	if err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		w.Write([]byte(err.Error()))
-		return
-	}
-	friends := ""
-	for _, friend := range userFirst.Friends {
-		friends += friend + " "
-	}
-	w.WriteHeader(http.StatusOK)
-	w.Write([]byte(friends))
-}
-
-func MakeFriends(w http.ResponseWriter, r *http.Request) {
-	content, err := ioutil.ReadAll(r.Body)
-	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		w.Write([]byte(err.Error()))
-		return
-	}
-	var f friends.Friends
-	if err := json.Unmarshal(content, &f); err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		w.Write([]byte(err.Error()))
-		return
-	}
-	userFirst, err := users.GetUserById(f.SourceId)
-	if err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		w.Write([]byte(err.Error()))
-		return
-	}
-	userSecond, err := users.GetUserById(f.TargetId)
-	if err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		w.Write([]byte(err.Error()))
-		return
-	}
-	userFirst.AddFriend(userSecond)
-	w.WriteHeader(http.StatusOK)
-	w.Write([]byte(fmt.Sprintf("%v и %v теперь друзья!", userFirst.Name, userSecond.Name)))
 }
 
 func Create(w http.ResponseWriter, r *http.Request) {
@@ -173,6 +141,7 @@ func Create(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		user_id := users.AddUser(&u)
+		users.Dump(abs)
 		w.WriteHeader(http.StatusCreated)
 		w.Write([]byte(fmt.Sprintf("User with id: %d was created", user_id)))
 	}
